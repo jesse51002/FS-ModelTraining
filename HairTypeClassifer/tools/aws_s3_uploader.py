@@ -1,11 +1,12 @@
 import os
-
+os.environ["CRYPTOGRAPHY_OPENSSL_NO_LEGACY"] = "1"
 import boto3
 from boto3.s3.transfer import TransferConfig
 import shutil
 
 s3resource = boto3.client('s3')
 BUCKET_NAME = "fs-upper-body-gan-dataset"
+
 
 def upload_aws_folder(abs_folder_path, rel_path):
     config = TransferConfig(multipart_threshold=1024*25, max_concurrency=10,
@@ -30,15 +31,29 @@ def upload_aws_folder(abs_folder_path, rel_path):
     
     print(f"Deleting {rel_path} from local\n\n")
     os.remove(zip_output_location)
-                
+
+
+def upload_dataset(root, aws_s3_root_key):
+    for texture in os.listdir(root):
+        abs_folder_path = os.path.join(root, texture)
+        if not os.path.isdir(abs_folder_path):
+            continue
+        
+        rel_path = os.path.join(aws_s3_root_key, texture)
+    
+        abs_folder_path = abs_folder_path.replace("\\", "/")
+        rel_path = rel_path.replace("\\", "/")
+
+        upload_aws_folder(abs_folder_path, rel_path)
+        
             
 if __name__ == "__main__":
     chosen = -1
     while chosen < 1 or chosen > 2:
         print("""
         Choose upload mode
-        1. Raw
-        2. Clean
+        1. Full Images
+        2. Hair Images
         """)
         chosen = int(input())
 
@@ -55,5 +70,8 @@ if __name__ == "__main__":
         else:
             print(f"{chosen} is an invalid choice, pick a valid choice")
             
-
+    if chosen == 1:
+        upload_dataset("data/", RAW_DOWNLOAD_ROOT_KEY)
+    elif chosen == 2:
+        upload_dataset("data/hair_only", "HairTypes_HairOnly/")
 

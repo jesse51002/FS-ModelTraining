@@ -4,8 +4,10 @@ import shutil
 import sys
 sys.path.insert(0, './')
 
+os.environ["CRYPTOGRAPHY_OPENSSL_NO_LEGACY"] = "1"
+
 import boto3
-from threading import Thread, Lock
+from threading import Thread
 
 data_folder = "./data"
 hair_only_folder = os.path.join(data_folder, "hair_only")
@@ -18,8 +20,9 @@ full_img_folder = os.path.join(data_folder, "full_img")
 s3resource = boto3.client('s3')
 BUCKET_NAME = "fs-upper-body-gan-dataset"
 
-hair_folders = ["staright", "wavy", "curly", "braids_dreads", "men"]
+hair_folders = ["staright", "wavy", "curly", "braids_dreads", "men", "afro"]
 RAW_DOWNLOAD_ROOT_KEY = "HairTypes/"
+
 
 def zip_parser(abs_folder_path, zip_file):
     if not os.path.isdir(abs_folder_path):

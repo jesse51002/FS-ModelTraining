@@ -15,7 +15,7 @@ import pandas as pd
 from p3m_util import gen_trimap_from_segmap_e2e
 from network import build_model
 
-CHECKPOINT = "src/p3m_matting/models/pretrained/P3M-Net_ViTAE-S_trained_on_P3M-10k.pth"
+CHECKPOINT = "models/p3m_matting/models/pretrained/P3M-Net_ViTAE-S_trained_on_P3M-10k.pth"
 ARCH = 'vitae'
 
 # build model
@@ -68,30 +68,27 @@ def remove_background(img, target_color=255):
         rw = infer_size
         rh = int(h / w * infer_size)
     rh = rh - rh % 64
-    rw = rw - rw % 64    
-
-    
-    # print(img.shape, (h,w), (rh,rw))
+    rw = rw - rw % 64
 
     input_tensor = F.interpolate(img_norm, size=(rh, rw), mode='bilinear')
     
     with torch.no_grad():
-        _, _, pred_fusion  = model(input_tensor)[:3]
+        _, _, pred_fusion = model(input_tensor)[:3]
 
     # output segment
     pred_fusion = F.interpolate(pred_fusion, size=(h, w), mode='bilinear')
 
-    pred_fusion = pred_fusion[:, 0].data.cpu().numpy()
+    pred_fusion = pred_fusion[:, 0].data.cpu()
     img = img.data.cpu().numpy()
     
-    pred_fusion = np.stack([pred_fusion, pred_fusion, pred_fusion], axis=1)
+    pred_fusion_img = np.stack([pred_fusion.numpy()] * 3, axis=1)
 
     # df_describe = pd.DataFrame(pred_fusion.flatten())
     # print(df_describe.describe())
 
     base = np.ones(img.shape) * target_color / 255
     distance = img - base
-    new_img = (base + distance * pred_fusion) * 255
+    new_img = (base + distance * pred_fusion_img) * 255
     
     return new_img, pred_fusion
         
