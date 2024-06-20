@@ -19,6 +19,7 @@ full_img_folder = os.path.join(data_folder, "full_img")
 BATCH_SIZE = 4
 BACKGROUND_COLOR = 255
 
+
 def preprocess_dataset():
     """
     Preprocesses the dataset by generating hair-only images for each hair type.
