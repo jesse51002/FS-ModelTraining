@@ -7,9 +7,10 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 from ibug.roi_tanh_warping import roi_tanh_polar_restore, roi_tanh_polar_warp
 import ibug.roi_tanh_warping.reference_impl as ref
+import ibug.roi_tanh_warping.pytorch_impl as ref_py
 from .rtnet import rtnet50, rtnet101, FCN
 from .resnet import Backbone, DeepLabV3Plus
-from torch.nn.functional import softmax
+from torch.nn import Softmax
 
 ENCODER_MAP = {
     'rtnet50': [rtnet50, 2048],  # model_func, in_channels
@@ -42,6 +43,7 @@ class SegmentationModel(nn.Module):
         else:
             self.encoder = Backbone(encoder)
             in_channels = self.encoder.num_channels
+
         self.decoder = DECODER_MAP[decoder.lower()](
             in_channels=in_channels, num_classes=num_classes)
         self.low_level = getattr(self.decoder, 'low_level', False)
@@ -76,52 +78,69 @@ class FaceParser(object):
             T.ToTensor(),
             T.Normalize(mean, std)
         ])
+
+        self.torch_transform = T.Compose([
+            T.Normalize(mean, std)
+        ])
+
+        self.softmax = Softmax(dim=1)
+
         if ckpt is None:
             ckpt = pretrained_ckpt
         ckpt = torch.load(ckpt, 'cpu')
         ckpt = ckpt.get('state_dict', ckpt)
         self.model.load_state_dict(ckpt, True)
+
+        for param in self.model.parameters():
+            param.requires_grad = False
+
         self.model.eval()
         self.model.to(device)
 
-    @torch.no_grad()
-    def predict_img(self, img, bboxes, rgb=False):
+    # @torch.no_grad()
+    def predict_img(self, img, bboxes, rgb=False): 
+        h,w = None, None
 
         if isinstance(img, str):
-            img = cv2.imread(img)
+            img = torch.tensor(cv2.imread(img)[:,:,::-1].copy()).permute((2,0,1))
+            img = img.unsqueeze(0).float().to("cuda:0") / 255
         elif isinstance(img, np.ndarray):
-            if rgb:
-                img = img[:, :, ::-1]
-        else:
+            img = torch.tensor(img[:,:,::-1].copy()).permute((2,0,1))
+            img = img.unsqueeze(0).float().to("cuda:0") / 255
+        elif not isinstance(img, torch.Tensor):
             raise TypeError
-        h, w = img.shape[:2]
+
+        h, w = img.shape[-2:]
 
         num_faces = len(bboxes)
 
-
-        imgs = [ref.roi_tanh_polar_warp(img, b, *self.sz, keep_aspect_ratio=True) for b in bboxes]
-        imgs = [self.transform(img) for img in imgs]
         bboxes_tensor = torch.tensor(
             bboxes).view(num_faces, -1).to(self.device)
 
-        # img = img.repeat(num_faces, 1, 1, 1)
-        # img = roi_tanh_polar_warp(
-            # img, bboxes_tensor, target_height=self.sz[0], target_width=self.sz[1], keep_aspect_ratio=True)
-        # img = self.transform(img).unsqueeze(0).to(self.device)
+        new_img = None
 
-        img = torch.stack(imgs).to(self.device)
-        logits = self.model(img, bboxes_tensor)
+        if not isinstance(img, torch.Tensor):
+            imgs = [ref.roi_tanh_polar_warp(img, b, *self.sz, keep_aspect_ratio=True) for b in bboxes]
+            imgs = [self.transform(img) for img in imgs]
+            new_img = torch.stack(imgs).to(self.device)
+        else:
+            new_img = ref_py.roi_tanh_polar_warp(img, bboxes_tensor, *self.sz, keep_aspect_ratio=True)
+            new_img = self.torch_transform(new_img)
+
+        logits = self.model(new_img, bboxes_tensor)
         mask = self.restore_warp(h, w, logits, bboxes_tensor)
         return mask
 
     def restore_warp(self, h, w, logits: torch.Tensor, bboxes_tensor):
-        logits = softmax(logits, 1)
-        logits[:, 0] = 1 - logits[:, 0]  # background class
-        logits = roi_tanh_polar_restore(
-            logits, bboxes_tensor, w, h, keep_aspect_ratio=True
+        soft_log = self.softmax(logits)
+        soft_log_1 = soft_log.clone()
+        soft_log_1[:, 0] = 1 - soft_log_1[:, 0]  # background class
+        restored_log = ref_py.roi_tanh_polar_restore(
+            soft_log_1, bboxes_tensor, w, h, keep_aspect_ratio=True
         )
-        logits[:, 0] = 1 - logits[:, 0]
-        predict = logits.cpu().argmax(1).numpy()
+        restored_log_1 = restored_log.clone()
+        restored_log_1[:, 0] = 1 - restored_log_1[:, 0]
+        predict = restored_log_1
         return predict
 
     @torch.no_grad()

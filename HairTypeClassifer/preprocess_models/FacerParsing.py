@@ -28,7 +28,7 @@ class FacerDetection:
         self.device = device
         self.face_detector_model = facer.face_detector('retinaface/mobilenet', device=self.device)
     
-    def inference(self, imgs: torch.Tensor, keep_one_img: bool=True) -> dict:
+    def inference(self, imgs: torch.Tensor, keep_one_img: bool = True) -> dict:
         """
         Input:
         imgs (torch tensor) (RGB): b x c x h x w

@@ -1,8 +1,9 @@
-import os
 import sys
-import time
+sys.path.insert(0,'./models/face_parsing/')
 
-from models.face_parsing.ibug.face_parsing import FaceParser as RTNetPredictor
+import os
+
+from ibug.face_parsing import FaceParser as RTNetPredictor
 from models.FaceDetector import output_bb
 # load libraries
 
@@ -30,10 +31,10 @@ IBUG_CLASSES = {
     }
 
 face_parser = RTNetPredictor(
-        device="cuda", ckpt="./farl_segmentation/ibug/face_parsing/rtnet/weights/rtnet50-fcn-14.torch", encoder="rtnet50", decoder="fcn", num_classes=14)
+        device="cuda", ckpt="./models/face_parsing/ibug/face_parsing/rtnet/weights/rtnet50-fcn-14.torch", encoder="rtnet50", decoder="fcn", num_classes=14)
 
 
-def get_segmentation(img, bbox):    
+def get_segmentation(img, bbox):
     masks = face_parser.predict_img(img, bbox, rgb=True)
     return masks
 
@@ -52,7 +53,7 @@ if __name__ == "__main__":
         unscaled_img = torch.tensor(cv2.imread(img_pth)[:,:,::-1].copy()).permute((2,0,1))
         unscaled_img = unscaled_img.unsqueeze(0).float().to("cuda:0")
         img = unscaled_img / 255
-        print("Img shape:",img.shape)
+        print("Img shape:", img.shape)
         bb = output_bb(img)
         print("Bounding box shape:", bb.shape)
         if len(bb) == 0:
