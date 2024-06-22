@@ -36,7 +36,6 @@ def train(weight_pth=None):
     net = mobilenet_v3_large(num_classes=NUM_CLASSES).cuda()
     
     optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-    
     writer = SummaryWriter()
     
     for epoch in range(NUM_EPOCHS):
