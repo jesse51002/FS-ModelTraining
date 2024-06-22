@@ -54,12 +54,18 @@ class CustomColorJitterTransform(torch.nn.Module):
         img = torch.where(is_back == 1, 255, img)
 
         return img
-    
 
-TRANSFORM =  v2.Compose([
+
+TRANSFORM = v2.Compose([
     transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
     CustomColorJitterTransform(brightness=0.5),
     v2.RandomHorizontalFlip(p=0.5),
+    v2.ToDtype(torch.float32, scale=True),
+    v2.Normalize(mean=[MEAN], std=[STD]),
+])
+
+TRANSFORM_NO_CHANGE = v2.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
     v2.ToDtype(torch.float32, scale=True),
     v2.Normalize(mean=[MEAN], std=[STD]),
 ])
@@ -72,6 +78,7 @@ INV_TRANSFORM = transforms.Compose([
         mean = [-MEAN],
         std = [ 1. ]),
 ])
+
 
 class HairTypeDataset(Dataset):
     def __init__(self, img_dir, split=Split.ALL):
@@ -89,6 +96,7 @@ class HairTypeDataset(Dataset):
         
         self.img_data : list[tuple[str, int]] = []
         self.img_dir = img_dir
+        self.split = split
         
         with open(SPLIT_JSON, "r") as f:
             split_info = json.load(f)
@@ -99,7 +107,6 @@ class HairTypeDataset(Dataset):
         elif split == Split.TRAIN:
             valid_list = split_info["train"]
         
-
         for folder in os.listdir(self.img_dir):
             folder_pth = os.path.join(self.img_dir, folder)
             
@@ -115,7 +122,6 @@ class HairTypeDataset(Dataset):
                     continue
                 
                 self.img_data.append((img_pth, self.class_to_idx[folder]))
-        
 
     def __len__(self):
         return len(self.img_data)
@@ -125,8 +131,11 @@ class HairTypeDataset(Dataset):
         image = read_image(img_path, mode=ImageReadMode.GRAY)
         label = self.img_data[idx][1]
         if self.transform is not None:
-            image = self.transform(image)
-
+            if self.split == Split.TRAIN:
+                image = self.transform(image)
+            else:
+                image = TRANSFORM_NO_CHANGE(image)
+                
         return image, label
     
     
