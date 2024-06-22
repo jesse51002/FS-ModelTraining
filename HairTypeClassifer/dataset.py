@@ -131,10 +131,10 @@ class HairTypeDataset(Dataset):
         image = read_image(img_path, mode=ImageReadMode.GRAY)
         label = self.img_data[idx][1]
         if self.transform is not None:
-            if self.split == Split.TRAIN:
-                image = self.transform(image)
-            else:
+            if self.split == Split.TEST:
                 image = TRANSFORM_NO_CHANGE(image)
+            else:
+                image = self.transform(image)
                 
         return image, label
     
