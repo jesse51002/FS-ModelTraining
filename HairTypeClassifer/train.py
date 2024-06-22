@@ -11,8 +11,8 @@ from dataset import HairTypeDataset, Split
 from mobilenetv3 import mobilenet_v3_large
 
 NUM_CLASSES = 6
-NUM_EPOCHS = 10
-BATCH_SIZE = 1
+NUM_EPOCHS = 60
+BATCH_SIZE = 20
 
 LOG_INTERVAL = 200
 
@@ -35,7 +35,7 @@ def train(weight_pth=None):
     
     net = mobilenet_v3_large(num_classes=NUM_CLASSES).cuda()
     
-    optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+    optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     
     writer = SummaryWriter()
     
