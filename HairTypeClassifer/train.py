@@ -141,6 +141,6 @@ def get_test_accuracy(net, test_dataloader, epoch):
 if __name__ == "__main__":
     model_pth = os.path.join(WEIGHTS_ROOT, "model-45.pth")
     model_pth = None
-    train(model_pth, whole=True)
+    train(model_pth, whole=False)
     
         
