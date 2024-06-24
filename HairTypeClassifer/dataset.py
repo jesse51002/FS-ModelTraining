@@ -70,6 +70,12 @@ TRANSFORM_NO_CHANGE = v2.Compose([
     v2.Normalize(mean=[MEAN], std=[STD]),
 ])
 
+INFERENCE_TRANSFORM = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+    v2.ToDtype(torch.float32, scale=False),
+    v2.Normalize(mean=[MEAN], std=[STD]),
+])
+
 INV_TRANSFORM = transforms.Compose([
     transforms.Normalize(
         mean = [ 0.],
