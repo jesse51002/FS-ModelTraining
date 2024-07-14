@@ -1,8 +1,12 @@
+import sys
+sys.path.insert(0, '/opt/ml/code')
+
 import argparse
 import math
 import random
 import os
 
+import shutil
 import numpy as np
 import torch
 from torch import nn, autograd, optim
@@ -449,6 +453,9 @@ if __name__ == "__main__":
         default=256,
         help="probability update interval of the adaptive augmentation",
     )
+    parser.add_argument(
+        "--sagemaker", action="store_true", help="Is running on sagemaker"
+    )
 
     args = parser.parse_args()
 
@@ -540,6 +547,15 @@ if __name__ == "__main__":
         ]
     )
 
+    if args.sagemaker:
+        for zipfile in os.listdir(args.path):
+            if zipfile.endswith(".zip"):
+                pth = os.path.join(args.path, zipfile)
+                folder = os.path.join(args.path, zipfile[:-4])
+                
+                shutil.unpack_archive(zipfile, folder)
+                os.remove(zipfile)
+    
     dataset = MultiResolutionDataset(args.path, transform, args.size)
     loader = data.DataLoader(
         dataset,
