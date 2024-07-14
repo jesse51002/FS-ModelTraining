@@ -46,7 +46,7 @@ def download_folder_list():
         folder_list = json.load(f)
 
     for folder in folder_list:
-        download_aws_folder(ROOT_DATA_FOLDER+folder, ROOT_S3_KEY+folder)
+        download_aws_folder(ROOT_DATA_FOLDER+folder, ROOT_S3_KEY+folder+".zip")
     
 if __name__ == "__main__":
     download_folder_list()

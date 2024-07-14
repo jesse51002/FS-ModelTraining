@@ -285,12 +285,6 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                     f"augment: {ada_aug_p:.4f}"
                 )
             )
-            
-            print(
-                    f"d: {d_loss_val:.4f}; g: {g_loss_val:.4f}; r1: {r1_val:.4f}; "
-                    f"path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
-                    f"augment: {ada_aug_p:.4f}"
-                )
 
             if wandb and args.wandb:
                 wandb.log(
@@ -312,12 +306,15 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                 with torch.no_grad():
                     g_ema.eval()
                     sample, _ = g_ema([sample_z])
+
+                    os.makedirs(args.output_data_dir, exist_ok=True)
+                    
                     utils.save_image(
                         sample,
                         os.path.join(args.output_data_dir, f"{str(i).zfill(6)}.png"),
                         nrow=int(args.n_sample ** 0.5),
                         normalize=True,
-                        range=(-1, 1),
+                        value_range=(-1, 1),
                     )
 
             if i % 10000 == 0:
@@ -343,9 +340,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="StyleGAN2 trainer")
 
     parser.add_argument(
-        "--path", 
+        "--path",
         type=str,
-        default=os.environ['SM_CHANNEL_TRAIN'],
+        default=os.environ['SM_CHANNEL_TRAIN'] if "SM_CHANNEL_TRAIN" in os.environ else None,
         help="path to dataset"
         )
     parser.add_argument('--arch', type=str, default='stylegan2', help='model architectures (stylegan2 | swagan)')
@@ -358,7 +355,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_sample",
         type=int,
-        default=64,
+        default=16,
         help="number of the samples generated during training",
     )
     parser.add_argument(
@@ -401,15 +398,15 @@ if __name__ == "__main__":
         help="path to the checkpoints to resume training",
     )
     parser.add_argument(
-        '--model_dir', 
+        '--model_dir',
         type=str, 
-        default=os.environ['SM_MODEL_DIR'],
+        default=os.environ['SM_MODEL_DIR'] if "SM_MODEL_DIR" in os.environ else "checkpoint/",
         help='sagemaker model dir'
         )
     parser.add_argument(
         '--output_data_dir',
         type=str,
-        default=os.environ['SM_OUTPUT_DATA_DIR'],
+        default=os.environ['SM_OUTPUT_DATA_DIR'] if "SM_OUTPUT_DATA_DIR" in os.environ else "data/output_data/",
         help='sagemaker output data dir'
         )
     parser.add_argument("--lr", type=float, default=0.002, help="learning rate")
@@ -460,6 +457,7 @@ if __name__ == "__main__":
 
     if args.distributed:
         torch.cuda.set_device(args.local_rank)
+        device = torch.device(args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method="env://")
         synchronize()
 
@@ -556,4 +554,4 @@ if __name__ == "__main__":
     train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, device)
 
 
-# python -m torch.distributed.launch --nproc_per_node=1 train.py --arch swagan --batch 1 --size 1024 --path "./data/accept_images_background_removed"
+# python -m torch.distributed.launch --nproc_per_node=1 train.py --batch 4 --size 1024 --path "./data/accept_images_background_removed" --arch swagan

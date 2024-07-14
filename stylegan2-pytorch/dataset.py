@@ -18,8 +18,6 @@ class MultiResolutionDataset(Dataset):
         if shuffle:
             random.shuffle(self.img_paths)
 
-        self.length = len(self.img_paths)
-
         self.transform = transform
 
     def __len__(self):

@@ -7,8 +7,8 @@ pytorch_estimator = PyTorch(
     instance_count=1,
     framework_version='1.8.0',
     py_version='py3',
-    hyperparameters = {
-        "batch": 16,
+    hyperparameters={
+        "batch": 8,
         "iter": 800000,
         "arch": "swagan",
         "size": 1024,
