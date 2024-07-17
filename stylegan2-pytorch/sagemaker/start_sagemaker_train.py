@@ -13,10 +13,11 @@ pytorch_estimator = PyTorch(
     entry_point='train.py',
     source_dir=".",
     role=sagemaker_execution_role,
-    instance_type='ml.g4dn.12xlarge',
+    instance_type='ml.g5.12xlarge',
     instance_count=1,
     framework_version='2.3.0',
     py_version='py311',
+    max_run=431999,
     hyperparameters={
         "batch": 8,
         "iter": 800000,
@@ -30,7 +31,7 @@ pytorch_estimator = PyTorch(
        {'Name': 'g_loss:error', 'Regex': 'g: (.*?);'},
        {'Name': 'r1_val:error', 'Regex': 'r1: (.*?);'},
        {'Name': 'path_loss:error', 'Regex': 'path: (.*?);'},
-       {'Name': 'mean_path_length_avg:error', 'Regex': 'mean path: : (.*?);'},
+       {'Name': 'mean_path_length_avg:error', 'Regex': 'mean_p: (.*?);'},
        {'Name': 'ada_aug_p:error', 'Regex': 'augment: (.*?);'},
     ],
     distribution={
@@ -42,6 +43,6 @@ pytorch_estimator = PyTorch(
         }
     }
 )
-
-
+# torchrun --nnodes 1 --nproc_per_node 4 train.py --arch swagan --batch 8 --distributed  --iter 800000 --num_gpu 4 --size 1024 --path data/accept_images_background_removed/
+# ml.g5.12xlarge
 pytorch_estimator.fit({'train': 's3://fs-upper-body-gan-dataset/accepted_images_background_removed/'})

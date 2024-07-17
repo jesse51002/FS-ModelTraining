@@ -135,7 +135,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
     pbar = range(args.iter)
 
-    if get_rank() == 0:
+    if int(os.environ["LOCAL_RANK"]) == 0:
         pbar = tqdm(pbar, initial=args.start_iter, dynamic_ncols=True, smoothing=0.01)
 
     mean_path_length = 0
@@ -266,7 +266,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
             g_optim.step()
 
             mean_path_length_avg = (
-                reduce_sum(mean_path_length).item() / get_world_size()
+                reduce_sum(mean_path_length).item() / int(os.environ["WORLD_SIZE"])
             )
 
         loss_dict["path"] = path_loss
@@ -284,11 +284,11 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
         fake_score_val = loss_reduced["fake_score"].mean().item()
         path_length_val = loss_reduced["path_length"].mean().item()
 
-        if get_rank() == 0:
+        if int(os.environ["LOCAL_RANK"]) == 0:
             print(
                 f"d: {d_loss_val:.4f}; g: {g_loss_val:.4f}; r1: {r1_val:.4f}; "
-                f"path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
-                f"augment: {ada_aug_p:.4f}"
+                f"path: {path_loss_val:.4f}; mean_p: {mean_path_length_avg:.4f}; "
+                f"augment: {ada_aug_p:.4f};"
             )
 
             if wandb and args.wandb:
@@ -307,7 +307,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                     }
                 )
 
-            if i % 100 == 0:
+            if i % 1000 == 0:
                 print(f"Finished: {i}/{args.iter} iterations")
                 with torch.no_grad():
                     g_ema.eval()
@@ -424,9 +424,6 @@ if __name__ == "__main__":
         "--wandb", action="store_true", help="use weights and biases logging"
     )
     parser.add_argument(
-        "--local-rank", type=int, default=0, help="local rank for distributed training"
-    )
-    parser.add_argument(
         "--augment", action="store_true", help="apply non leaking augmentation"
     )
     parser.add_argument(
@@ -472,15 +469,15 @@ if __name__ == "__main__":
     n_gpu = args.num_gpu
     if args.distributed is None:
         args.distributed = n_gpu > 1
-
+    
     if args.distributed:
-        torch.cuda.set_device(args.local_rank)
-
-        torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=get_rank())
-        synchronize()
+        rank = os.environ["LOCAL_RANK"]
+        print(f"Starting {rank} out of {args.num_gpu}")
         
-        print(f"Starting {args.local_rank} out of {args.num_gpu}")
-        os.environ['WORLD_SIZE'] = str(args.num_gpu)
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+
+        torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=int(os.environ["LOCAL_RANK"]))
+        synchronize()
         
     args.latent = 512
     args.n_mlp = 8
@@ -541,15 +538,15 @@ if __name__ == "__main__":
     if args.distributed:
         generator = nn.parallel.DistributedDataParallel(
             generator,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
+            device_ids=[int(os.environ["LOCAL_RANK"])],
+            output_device=int(os.environ["LOCAL_RANK"]),
             broadcast_buffers=False,
         )
 
         discriminator = nn.parallel.DistributedDataParallel(
             discriminator,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
+            device_ids=[int(os.environ["LOCAL_RANK"])],
+            output_device=int(os.environ["LOCAL_RANK"]),
             broadcast_buffers=False,
         )
 
@@ -576,9 +573,6 @@ if __name__ == "__main__":
             os.remove(zip_pth)
     
         print("Finished unzipping...")
-
-    if os.path.isfile(lock_pth):
-        os.remove(lock_pth)
         
     dataset = MultiResolutionDataset(args.path, transform, args.size)
     loader = data.DataLoader(
@@ -588,7 +582,7 @@ if __name__ == "__main__":
         drop_last=True,
     )
 
-    if get_rank() == 0 and wandb is not None and args.wandb:
+    if int(os.environ["LOCAL_RANK"]) == 0 and wandb is not None and args.wandb:
         wandb.init(project="stylegan 2")
 
     print("Starting Train")
