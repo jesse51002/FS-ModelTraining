@@ -6,3 +6,5 @@ RUN pip install ninja
 ENV PATH="/opt/ml/code:${PATH}"
 ENV SAGEMAKER_SUBMIT_DIRECTORY /opt/ml/code
 ADD . /opt/ml/code
+
+RUN rm -f /opt/ml/code/train.py

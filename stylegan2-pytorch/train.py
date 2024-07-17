@@ -5,6 +5,7 @@ import argparse
 import math
 import random
 import os
+import time
 
 import shutil
 import numpy as np
@@ -15,6 +16,8 @@ from torch.utils import data
 import torch.distributed as dist
 from torchvision import transforms, utils
 from tqdm import tqdm
+
+from filelock import Timeout, FileLock
 
 try:
     import wandb
@@ -282,12 +285,10 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
         path_length_val = loss_reduced["path_length"].mean().item()
 
         if get_rank() == 0:
-            pbar.set_description(
-                (
-                    f"d: {d_loss_val:.4f}; g: {g_loss_val:.4f}; r1: {r1_val:.4f}; "
-                    f"path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
-                    f"augment: {ada_aug_p:.4f}"
-                )
+            print(
+                f"d: {d_loss_val:.4f}; g: {g_loss_val:.4f}; r1: {r1_val:.4f}; "
+                f"path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
+                f"augment: {ada_aug_p:.4f}"
             )
 
             if wandb and args.wandb:
@@ -307,6 +308,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                 )
 
             if i % 100 == 0:
+                print(f"Finished: {i}/{args.iter} iterations")
                 with torch.no_grad():
                     g_ema.eval()
                     sample, _ = g_ema([sample_z])
@@ -334,8 +336,6 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                     },
                     os.path.join(args.model_dir, f"{str(i).zfill(6)}.pt")
                 )
-
-
 
 
 if __name__ == "__main__":
@@ -403,7 +403,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--model_dir',
-        type=str, 
+        type=str,
         default=os.environ['SM_MODEL_DIR'] if "SM_MODEL_DIR" in os.environ else "checkpoint/",
         help='sagemaker model dir'
         )
@@ -454,20 +454,34 @@ if __name__ == "__main__":
         help="probability update interval of the adaptive augmentation",
     )
     parser.add_argument(
-        "--sagemaker", action="store_true", help="Is running on sagemaker"
+        "--distributed",
+        action="store_true", help="if distributed",
+        default=None
+    )
+    parser.add_argument(
+        "--num_gpu",
+        type=int,
+        default=1,
+        help="num_gpu",
     )
 
     args = parser.parse_args()
-
-    n_gpu = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
-    args.distributed = n_gpu > 1
+    
+    assert args.path is not None, "'--path' must be specified"
+    
+    n_gpu = args.num_gpu
+    if args.distributed is None:
+        args.distributed = n_gpu > 1
 
     if args.distributed:
         torch.cuda.set_device(args.local_rank)
-        device = torch.device(args.local_rank)
-        torch.distributed.init_process_group(backend="nccl", init_method="env://")
-        synchronize()
 
+        torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=get_rank())
+        synchronize()
+        
+        print(f"Starting {args.local_rank} out of {args.num_gpu}")
+        os.environ['WORLD_SIZE'] = str(args.num_gpu)
+        
     args.latent = 512
     args.n_mlp = 8
 
@@ -547,15 +561,25 @@ if __name__ == "__main__":
         ]
     )
 
-    if args.sagemaker:
+    lock_pth = os.path.join(args.path, "dataset.txt.lock")
+    with FileLock(lock_pth):
+        print("Starting unzipping...")
+        
         for zipfile in os.listdir(args.path):
-            if zipfile.endswith(".zip"):
-                pth = os.path.join(args.path, zipfile)
-                folder = os.path.join(args.path, zipfile[:-4])
+            if not zipfile.endswith(".zip"):
+                continue
                 
-                shutil.unpack_archive(zipfile, folder)
-                os.remove(zipfile)
+            zip_pth = os.path.join(args.path, zipfile)
+            folder = os.path.join(args.path, zipfile[:-4])
+            
+            shutil.unpack_archive(zip_pth, folder)
+            os.remove(zip_pth)
     
+        print("Finished unzipping...")
+
+    if os.path.isfile(lock_pth):
+        os.remove(lock_pth)
+        
     dataset = MultiResolutionDataset(args.path, transform, args.size)
     loader = data.DataLoader(
         dataset,
@@ -567,6 +591,7 @@ if __name__ == "__main__":
     if get_rank() == 0 and wandb is not None and args.wandb:
         wandb.init(project="stylegan 2")
 
+    print("Starting Train")
     train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, device)
 
 
