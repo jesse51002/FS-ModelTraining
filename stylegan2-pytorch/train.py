@@ -1,3 +1,6 @@
+import os
+os.environ["CRYPTOGRAPHY_OPENSSL_NO_LEGACY"] = "1"
+
 import sys
 sys.path.insert(0, '/opt/ml/code')
 
@@ -17,6 +20,7 @@ import torch.distributed as dist
 from torchvision import transforms, utils
 from tqdm import tqdm
 
+import boto3
 from filelock import Timeout, FileLock
 
 try:
@@ -37,6 +41,10 @@ from distributed import (
 from op import conv2d_gradfix
 from non_leaking import augment, AdaptiveAugment
 
+
+BUCKET_NAME = "fs-upper-body-gan-dataset"
+ROOT_S3_CKPT_KEY = "training/"
+ROOT_S3_IMAGES_KEY = "training/output_images/"
 
 def data_sampler(dataset, shuffle, distributed):
     if distributed:
@@ -314,14 +322,20 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                     sample, _ = g_ema([sample_z])
 
                     os.makedirs(args.output_data_dir, exist_ok=True)
-                    
+
+                    img_pth = os.path.join(args.output_data_dir, f"{str(i).zfill(6)}.png")
                     utils.save_image(
                         sample,
-                        os.path.join(args.output_data_dir, f"{str(i).zfill(6)}.png"),
+                        img_pth,
                         nrow=int(args.n_sample ** 0.5),
                         normalize=True,
                         value_range=(-1, 1),
                     )
+
+                    if args.upload_images_to_s3:
+                        s3resource = boto3.client('s3')
+                        s3resource.upload_file(img_pth, BUCKET_NAME, ROOT_S3_IMAGES_KEY + os.path.basename(img_pth))
+                        print(f"Uploaded '{img_pth}' to s3")
 
             if i % 10000 == 0:
                 torch.save(
@@ -461,10 +475,24 @@ if __name__ == "__main__":
         default=1,
         help="num_gpu",
     )
+    parser.add_argument(
+        "--aws_checkpoint_name",
+        type=str,
+        default=None,
+        help="name of the checkpoint stored on s3",
+    )
+    parser.add_argument(
+        "--upload_images_to_s3",
+        action="store_true", help="whether to upload images to generated images to s3",
+    )
 
     args = parser.parse_args()
     
     assert args.path is not None, "'--path' must be specified"
+
+    if "LOCAL_RANK" not in os.environ:
+        os.environ["LOCAL_RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
     
     n_gpu = args.num_gpu
     if args.distributed is None:
@@ -516,9 +544,24 @@ if __name__ == "__main__":
         betas=(0 ** d_reg_ratio, 0.99 ** d_reg_ratio),
     )
 
+    lock_pth = os.path.join(args.path, "dataset.txt.lock")
+    if args.aws_checkpoint_name is not None:
+        with FileLock(lock_pth):
+            target_pth = os.path.join(args.model_dir, args.aws_checkpoint_name)
+    
+            if not os.path.isfile(target_pth):
+                assert args.ckpt is None, "Can not have ckpt and aws_checkpoint both set"
+                
+                s3resource = boto3.client('s3')
+                s3resource.download_file(Bucket=BUCKET_NAME, Key=ROOT_S3_CKPT_KEY + args.aws_checkpoint_name, Filename=target_pth)
+            
+            args.ckpt = target_pth
+                
     if args.ckpt is not None:
         print("load model:", args.ckpt)
 
+        ROOT_S3_CKPT_KEY
+        
         ckpt = torch.load(args.ckpt, map_location=lambda storage, loc: storage)
 
         try:
@@ -558,7 +601,6 @@ if __name__ == "__main__":
         ]
     )
 
-    lock_pth = os.path.join(args.path, "dataset.txt.lock")
     with FileLock(lock_pth):
         print("Starting unzipping...")
         
