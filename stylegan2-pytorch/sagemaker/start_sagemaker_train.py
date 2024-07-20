@@ -25,9 +25,10 @@ pytorch_estimator = PyTorch(
         "size": 1024,
         "distributed": None,
         "num_gpu": 4,
-        "aws_checkpoint_name": "040000.pt",
+        "aws_checkpoint_name": "050000.pt",
         "upload_images_to_s3": None,
-        "n_sample": 49
+        "n_sample": 36,
+        "lr": 0.0002
     },
     metric_definitions=[
        {'Name': 'd_loss:error', 'Regex': 'd: (.*?);'},
@@ -47,6 +48,6 @@ pytorch_estimator = PyTorch(
     }
 )
 # torchrun --nnodes 1 --nproc_per_node 4 train.py --arch swagan --batch 8 --distributed  --iter 800000 --num_gpu 4 --size 1024 --path data/accept_images_background_removed/
-# python train.py --arch swagan --batch 8 --iter 800000 --num_gpu 1 --size 1024 --aws_checkpoint_name 040000.pt --upload_images_to_s3 --path data/accept_images_background_removed/ --n_sample 49
+# python train.py --arch swagan --batch 8 --iter 800000 --num_gpu 1 --size 1024 --aws_checkpoint_name 040000.pt --upload_images_to_s3 --path data/accept_images_background_removed/ --n_sample 36
 # ml.g5.12xlarge
 pytorch_estimator.fit({'train': 's3://fs-upper-body-gan-dataset/accepted_images_background_removed/'})

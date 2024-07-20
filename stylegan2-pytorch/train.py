@@ -317,6 +317,8 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
             if i % 1000 == 0:
                 print(f"Finished: {i}/{args.iter} iterations")
+
+                torch.cuda.empty_cache()
                 with torch.no_grad():
                     g_ema.eval()
                     sample, _ = g_ema([sample_z])
