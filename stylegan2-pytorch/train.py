@@ -206,8 +206,9 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
         loss_dict["fake_score"] = fake_pred.mean()
 
         discriminator.zero_grad()
-        d_loss.backward()
-        d_optim.step()
+        if d_loss > args.discriminator_loss_limit:
+            d_loss.backward()
+            d_optim.step()
 
         if args.augment and args.augment_p == 0:
             ada_aug_p = ada_augment.tune(real_pred)
@@ -429,7 +430,8 @@ if __name__ == "__main__":
         default=os.environ['SM_OUTPUT_DATA_DIR'] if "SM_OUTPUT_DATA_DIR" in os.environ else "data/output_data/",
         help='sagemaker output data dir'
         )
-    parser.add_argument("--lr", type=float, default=0.002, help="learning rate")
+    parser.add_argument("--lr_generator", type=float, default=0.002, help="learning rate")
+    parser.add_argument("--lr_discriminator", type=float, default=0.01, help="learning rate")
     parser.add_argument(
         "--channel_multiplier",
         type=int,
@@ -487,6 +489,11 @@ if __name__ == "__main__":
         "--upload_images_to_s3",
         action="store_true", help="whether to upload images to generated images to s3",
     )
+    parser.add_argument(
+        "--discriminator_loss_limit",
+        type=float,
+        default=0.75
+    )
 
     args = parser.parse_args()
     
@@ -537,12 +544,12 @@ if __name__ == "__main__":
 
     g_optim = optim.Adam(
         generator.parameters(),
-        lr=args.lr * g_reg_ratio,
+        lr=args.lr_generator * g_reg_ratio,
         betas=(0 ** g_reg_ratio, 0.99 ** g_reg_ratio),
     )
     d_optim = optim.Adam(
         discriminator.parameters(),
-        lr=args.lr * d_reg_ratio,
+        lr=args.lr_discriminator * d_reg_ratio,
         betas=(0 ** d_reg_ratio, 0.99 ** d_reg_ratio),
     )
 

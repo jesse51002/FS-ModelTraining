@@ -25,10 +25,12 @@ pytorch_estimator = PyTorch(
         "size": 1024,
         "distributed": None,
         "num_gpu": 4,
-        "aws_checkpoint_name": "050000.pt",
+        "aws_checkpoint_name": "040000.pt",
         "upload_images_to_s3": None,
         "n_sample": 36,
-        "lr": 0.0002
+        "lr_generator": 0.0002,
+        "lr_discriminator": 0.005,
+        "discriminator_loss_limit": 0.75
     },
     metric_definitions=[
        {'Name': 'd_loss:error', 'Regex': 'd: (.*?);'},
