@@ -101,6 +101,11 @@ def all_gather(data):
     return data_list
 
 
+def reduce_all_variable(value):
+    dist.barrier()
+    return dist.all_reduce(value, op=torch.distributed.ReduceOp.AVG)
+    
+
 def reduce_loss_dict(loss_dict):
     world_size = get_world_size()
 

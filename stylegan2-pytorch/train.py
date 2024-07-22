@@ -37,6 +37,7 @@ from distributed import (
     reduce_loss_dict,
     reduce_sum,
     get_world_size,
+    reduce_all_variable
 )
 from op import conv2d_gradfix
 from non_leaking import augment, AdaptiveAugment
@@ -173,6 +174,8 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
     sample_z = torch.randn(args.n_sample, args.latent, device=device)
 
+    discrim_loss = np.array([])
+    
     for idx in pbar:
         i = idx + args.start_iter
 
@@ -206,8 +209,16 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
         loss_dict["fake_score"] = fake_pred.mean()
 
         discriminator.zero_grad()
-        if d_loss > args.discriminator_loss_limit:
-            d_loss.backward()
+        
+        d_loss.backward()
+
+        reduced_loss = d_loss.clone()
+        reduce_all_variable(reduced_loss)
+
+        discrim_loss = np.append(discrim_loss, [reduced_loss.item()])
+
+        last_100_avg_loss = discrim_loss[max(0, discrim_loss.shape[0] - 100):].mean()
+        if last_100_avg_loss > args.discriminator_loss_limit:
             d_optim.step()
 
         if args.augment and args.augment_p == 0:
