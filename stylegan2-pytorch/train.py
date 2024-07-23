@@ -181,7 +181,6 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
         if i > args.iter:
             print("Done!")
-
             break
 
         real_img = next(loader)
@@ -213,7 +212,8 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
         d_loss.backward()
 
         reduced_loss = d_loss.clone()
-        reduce_all_variable(reduced_loss)
+        if args.distributed:
+            reduce_all_variable(reduced_loss)
 
         discrim_loss = np.append(discrim_loss, [reduced_loss.item()])
 

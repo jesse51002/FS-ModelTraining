@@ -36,7 +36,6 @@ class AdaptiveAugment:
 
             if self.r_t_stat > self.ada_aug_target:
                 sign = 1
-
             else:
                 sign = -1
 
@@ -357,8 +356,8 @@ class GridSampleForward(autograd.Function):
 class GridSampleBackward(autograd.Function):
     @staticmethod
     def forward(ctx, grad_output, input, grid):
-        op = torch._C._jit_get_operation("aten::grid_sampler_2d_backward")
-        grad_input, grad_grid = op(grad_output, input, grid, 0, 0, False)
+        op, _ = torch._C._jit_get_operation("aten::grid_sampler_2d_backward")
+        grad_input, grad_grid = op(grad_output, input, grid, 0, 0, False, [True, True])
         ctx.save_for_backward(grid)
 
         return grad_input, grad_grid
