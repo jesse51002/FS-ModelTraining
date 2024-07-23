@@ -29,8 +29,10 @@ pytorch_estimator = PyTorch(
         "upload_images_to_s3": None,
         "n_sample": 36,
         "lr_generator": 0.0002,
-        "lr_discriminator": 0.01,
-        "discriminator_loss_limit": 0.8
+        "lr_discriminator": 0.05,
+        "discriminator_loss_limit": 0.90,
+        "augment": None,
+        "ada_length": 100000
     },
     metric_definitions=[
        {'Name': 'd_loss:error', 'Regex': 'd: (.*?);'},

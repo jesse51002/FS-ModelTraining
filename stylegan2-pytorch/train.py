@@ -241,8 +241,8 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
             discriminator.zero_grad()
             (args.r1 / 2 * r1_loss * args.d_reg_every + 0 * real_pred[0]).backward()
-
-            d_optim.step()
+            if last_100_avg_loss > args.discriminator_loss_limit:
+                d_optim.step()
 
         loss_dict["r1"] = r1_loss
 
