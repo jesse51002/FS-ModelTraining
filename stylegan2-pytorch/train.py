@@ -424,9 +424,6 @@ if __name__ == "__main__":
         "--wandb", action="store_true", help="use weights and biases logging"
     )
     parser.add_argument(
-        "--local-rank", type=int, default=0, help="local rank for distributed training"
-    )
-    parser.add_argument(
         "--augment", action="store_true", help="apply non leaking augmentation"
     )
     parser.add_argument(
@@ -474,12 +471,12 @@ if __name__ == "__main__":
         args.distributed = n_gpu > 1
 
     if args.distributed:
-        torch.cuda.set_device(args.local_rank)
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
 
-        torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=get_rank())
+        torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=int(os.environ["LOCAL_RANK"]))
         synchronize()
         
-        print(f"Starting {args.local_rank} out of {args.num_gpu}")
+        print(f"Starting {int(os.environ["LOCAL_RANK"])} out of {args.num_gpu}")
         os.environ['WORLD_SIZE'] = str(args.num_gpu)
         
     args.latent = 512
@@ -541,15 +538,15 @@ if __name__ == "__main__":
     if args.distributed:
         generator = nn.parallel.DistributedDataParallel(
             generator,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
+            device_ids=[int(os.environ["LOCAL_RANK"])],
+            output_device=int(os.environ["LOCAL_RANK"]),
             broadcast_buffers=False,
         )
 
         discriminator = nn.parallel.DistributedDataParallel(
             discriminator,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
+            device_ids=[int(os.environ["LOCAL_RANK"])],
+            output_device=int(os.environ["LOCAL_RANK"]),
             broadcast_buffers=False,
         )
 

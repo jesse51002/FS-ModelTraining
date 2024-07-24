@@ -1,0 +1,10 @@
+FROM 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-training:1.8.0-gpu-py36
+
+RUN pip install ninja
+
+# Adds code base
+ENV PATH="/opt/ml/code:${PATH}"
+ENV SAGEMAKER_SUBMIT_DIRECTORY /opt/ml/code
+ADD . /opt/ml/code
+
+RUN rm -f /opt/ml/code/train.py

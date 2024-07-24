@@ -91,7 +91,7 @@ def train(weight_pth=None, whole=False):
             
             loss = LOSS(inference, train_labels)
             loss.backward()
-            
+            optimizer.zero_grad()
             optimizer.step()
             optimizer.zero_grad()
 
