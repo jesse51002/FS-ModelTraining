@@ -1,3 +1,6 @@
+import os
+os.environ["CRYPTOGRAPHY_OPENSSL_NO_LEGACY"] = "1"
+
 import sys
 sys.path.insert(0, '/opt/ml/code')
 
@@ -17,6 +20,7 @@ import torch.distributed as dist
 from torchvision import transforms, utils
 from tqdm import tqdm
 
+import boto3
 from filelock import Timeout, FileLock
 
 try:
@@ -33,10 +37,15 @@ from distributed import (
     reduce_loss_dict,
     reduce_sum,
     get_world_size,
+    reduce_all_variable
 )
 from op import conv2d_gradfix
 from non_leaking import augment, AdaptiveAugment
 
+
+BUCKET_NAME = "fs-upper-body-gan-dataset"
+ROOT_S3_CKPT_KEY = "training/"
+ROOT_S3_IMAGES_KEY = "training/output_images/"
 
 def data_sampler(dataset, shuffle, distributed):
     if distributed:
@@ -135,7 +144,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
     pbar = range(args.iter)
 
-    if get_rank() == 0:
+    if int(os.environ["LOCAL_RANK"]) == 0:
         pbar = tqdm(pbar, initial=args.start_iter, dynamic_ncols=True, smoothing=0.01)
 
     mean_path_length = 0
@@ -165,12 +174,13 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
     sample_z = torch.randn(args.n_sample, args.latent, device=device)
 
+    discrim_loss = np.array([])
+    
     for idx in pbar:
         i = idx + args.start_iter
 
         if i > args.iter:
             print("Done!")
-
             break
 
         real_img = next(loader)
@@ -198,8 +208,18 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
         loss_dict["fake_score"] = fake_pred.mean()
 
         discriminator.zero_grad()
+        
         d_loss.backward()
-        d_optim.step()
+
+        reduced_loss = d_loss.clone()
+        if args.distributed:
+            reduce_all_variable(reduced_loss)
+
+        discrim_loss = np.append(discrim_loss, [reduced_loss.item()])
+
+        last_100_avg_loss = discrim_loss[max(0, discrim_loss.shape[0] - 100):].mean()
+        if last_100_avg_loss > args.discriminator_loss_limit:
+            d_optim.step()
 
         if args.augment and args.augment_p == 0:
             ada_aug_p = ada_augment.tune(real_pred)
@@ -221,8 +241,8 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
             discriminator.zero_grad()
             (args.r1 / 2 * r1_loss * args.d_reg_every + 0 * real_pred[0]).backward()
-
-            d_optim.step()
+            if last_100_avg_loss > args.discriminator_loss_limit:
+                d_optim.step()
 
         loss_dict["r1"] = r1_loss
 
@@ -266,7 +286,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
             g_optim.step()
 
             mean_path_length_avg = (
-                reduce_sum(mean_path_length).item() / get_world_size()
+                reduce_sum(mean_path_length).item() / int(os.environ["WORLD_SIZE"])
             )
 
         loss_dict["path"] = path_loss
@@ -284,11 +304,11 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
         fake_score_val = loss_reduced["fake_score"].mean().item()
         path_length_val = loss_reduced["path_length"].mean().item()
 
-        if get_rank() == 0:
+        if int(os.environ["LOCAL_RANK"]) == 0:
             print(
                 f"d: {d_loss_val:.4f}; g: {g_loss_val:.4f}; r1: {r1_val:.4f}; "
-                f"path: {path_loss_val:.4f}; mean path: {mean_path_length_avg:.4f}; "
-                f"augment: {ada_aug_p:.4f}"
+                f"path: {path_loss_val:.4f}; mean_p: {mean_path_length_avg:.4f}; "
+                f"augment: {ada_aug_p:.4f};"
             )
 
             if wandb and args.wandb:
@@ -307,21 +327,29 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                     }
                 )
 
-            if i % 100 == 0:
+            if i % 1000 == 0:
                 print(f"Finished: {i}/{args.iter} iterations")
+
+                torch.cuda.empty_cache()
                 with torch.no_grad():
                     g_ema.eval()
                     sample, _ = g_ema([sample_z])
 
                     os.makedirs(args.output_data_dir, exist_ok=True)
-                    
+
+                    img_pth = os.path.join(args.output_data_dir, f"{str(i).zfill(6)}.png")
                     utils.save_image(
                         sample,
-                        os.path.join(args.output_data_dir, f"{str(i).zfill(6)}.png"),
+                        img_pth,
                         nrow=int(args.n_sample ** 0.5),
                         normalize=True,
                         value_range=(-1, 1),
                     )
+
+                    if args.upload_images_to_s3:
+                        s3resource = boto3.client('s3')
+                        s3resource.upload_file(img_pth, BUCKET_NAME, ROOT_S3_IMAGES_KEY + os.path.basename(img_pth))
+                        print(f"Uploaded '{img_pth}' to s3")
 
             if i % 10000 == 0:
                 torch.save(
@@ -413,7 +441,8 @@ if __name__ == "__main__":
         default=os.environ['SM_OUTPUT_DATA_DIR'] if "SM_OUTPUT_DATA_DIR" in os.environ else "data/output_data/",
         help='sagemaker output data dir'
         )
-    parser.add_argument("--lr", type=float, default=0.002, help="learning rate")
+    parser.add_argument("--lr_generator", type=float, default=0.002, help="learning rate")
+    parser.add_argument("--lr_discriminator", type=float, default=0.01, help="learning rate")
     parser.add_argument(
         "--channel_multiplier",
         type=int,
@@ -461,23 +490,42 @@ if __name__ == "__main__":
         default=1,
         help="num_gpu",
     )
+    parser.add_argument(
+        "--aws_checkpoint_name",
+        type=str,
+        default=None,
+        help="name of the checkpoint stored on s3",
+    )
+    parser.add_argument(
+        "--upload_images_to_s3",
+        action="store_true", help="whether to upload images to generated images to s3",
+    )
+    parser.add_argument(
+        "--discriminator_loss_limit",
+        type=float,
+        default=0.75
+    )
 
     args = parser.parse_args()
     
     assert args.path is not None, "'--path' must be specified"
+
+    if "LOCAL_RANK" not in os.environ:
+        os.environ["LOCAL_RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
     
     n_gpu = args.num_gpu
     if args.distributed is None:
         args.distributed = n_gpu > 1
-
+    
     if args.distributed:
+        rank = os.environ["LOCAL_RANK"]
+        print(f"Starting {rank} out of {args.num_gpu}")
+        
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
 
         torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=int(os.environ["LOCAL_RANK"]))
         synchronize()
-        
-        print(f"Starting {int(os.environ["LOCAL_RANK"])} out of {args.num_gpu}")
-        os.environ['WORLD_SIZE'] = str(args.num_gpu)
         
     args.latent = 512
     args.n_mlp = 8
@@ -507,18 +555,33 @@ if __name__ == "__main__":
 
     g_optim = optim.Adam(
         generator.parameters(),
-        lr=args.lr * g_reg_ratio,
+        lr=args.lr_generator * g_reg_ratio,
         betas=(0 ** g_reg_ratio, 0.99 ** g_reg_ratio),
     )
     d_optim = optim.Adam(
         discriminator.parameters(),
-        lr=args.lr * d_reg_ratio,
+        lr=args.lr_discriminator * d_reg_ratio,
         betas=(0 ** d_reg_ratio, 0.99 ** d_reg_ratio),
     )
 
+    lock_pth = os.path.join(args.path, "dataset.txt.lock")
+    if args.aws_checkpoint_name is not None:
+        with FileLock(lock_pth):
+            target_pth = os.path.join(args.model_dir, args.aws_checkpoint_name)
+    
+            if not os.path.isfile(target_pth):
+                assert args.ckpt is None, "Can not have ckpt and aws_checkpoint both set"
+                
+                s3resource = boto3.client('s3')
+                s3resource.download_file(Bucket=BUCKET_NAME, Key=ROOT_S3_CKPT_KEY + args.aws_checkpoint_name, Filename=target_pth)
+            
+            args.ckpt = target_pth
+                
     if args.ckpt is not None:
         print("load model:", args.ckpt)
 
+        ROOT_S3_CKPT_KEY
+        
         ckpt = torch.load(args.ckpt, map_location=lambda storage, loc: storage)
 
         try:
@@ -558,7 +621,6 @@ if __name__ == "__main__":
         ]
     )
 
-    lock_pth = os.path.join(args.path, "dataset.txt.lock")
     with FileLock(lock_pth):
         print("Starting unzipping...")
         
@@ -573,9 +635,6 @@ if __name__ == "__main__":
             os.remove(zip_pth)
     
         print("Finished unzipping...")
-
-    if os.path.isfile(lock_pth):
-        os.remove(lock_pth)
         
     dataset = MultiResolutionDataset(args.path, transform, args.size)
     loader = data.DataLoader(
@@ -585,7 +644,7 @@ if __name__ == "__main__":
         drop_last=True,
     )
 
-    if get_rank() == 0 and wandb is not None and args.wandb:
+    if int(os.environ["LOCAL_RANK"]) == 0 and wandb is not None and args.wandb:
         wandb.init(project="stylegan 2")
 
     print("Starting Train")

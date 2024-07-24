@@ -1,13 +1,12 @@
+import os
 import argparse
 
 import torch
 from torchvision import utils
-from model import Generator
 from tqdm import tqdm
 
 
-def generate(args, g_ema, device, mean_latent):
-
+def generate(args, g_ema, device, mean_latent, save_file_name):
     with torch.no_grad():
         g_ema.eval()
         for i in tqdm(range(args.pics)):
@@ -19,10 +18,10 @@ def generate(args, g_ema, device, mean_latent):
 
             utils.save_image(
                 sample,
-                f"sample/{str(i).zfill(6)}.png",
-                nrow=1,
+                os.path.join("sample", save_file_name + ".png"),
+                nrow=int(args.sample ** 0.5),
                 normalize=True,
-                range=(-1, 1),
+                value_range=(-1, 1),
             )
 
 
@@ -37,11 +36,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sample",
         type=int,
-        default=1,
+        default=36,
         help="number of samples to be generated for each image",
     )
     parser.add_argument(
-        "--pics", type=int, default=20, help="number of images to be generated"
+        "--pics", type=int, default=1, help="number of images to be generated"
     )
     parser.add_argument("--truncation", type=float, default=1, help="truncation ratio")
     parser.add_argument(
@@ -53,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ckpt",
         type=str,
-        default="stylegan2-ffhq-config-f.pt",
+        default=None,
         help="path to the model checkpoint",
     )
     parser.add_argument(
@@ -62,23 +61,45 @@ if __name__ == "__main__":
         default=2,
         help="channel multiplier of the generator. config-f = 2, else = 1",
     )
+    parser.add_argument('--arch', type=str, default='swagan', help='model architectures (stylegan2 | swagan)')
 
     args = parser.parse_args()
 
     args.latent = 512
     args.n_mlp = 8
 
+    if args.arch == 'stylegan2':
+        from model import Generator
+
+    elif args.arch == 'swagan':
+        from swagan import Generator
+
     g_ema = Generator(
         args.size, args.latent, args.n_mlp, channel_multiplier=args.channel_multiplier
     ).to(device)
-    checkpoint = torch.load(args.ckpt)
 
-    g_ema.load_state_dict(checkpoint["g_ema"])
-
-    if args.truncation < 1:
-        with torch.no_grad():
-            mean_latent = g_ema.mean_latent(args.truncation_mean)
+    def run(ckpt, save_folder):
+        checkpoint = torch.load(ckpt)
+        
+        g_ema.load_state_dict(checkpoint["g_ema"])
+    
+        if args.truncation < 1:
+            with torch.no_grad():
+                mean_latent = g_ema.mean_latent(args.truncation_mean)
+        else:
+            mean_latent = None
+    
+        generate(args, g_ema, device, mean_latent, save_folder)
+    
+    if args.ckpt is None:
+        for ckpt_name in os.listdir("checkpoint/"):
+            if not ckpt_name.endswith(".pt"):
+                continue
+            
+            ckpt_pth = "checkpoint/" + ckpt_name
+            print(f"Generating for {ckpt_name}")
+            run(ckpt_pth, os.path.splitext(ckpt_name)[0])
     else:
-        mean_latent = None
-
-    generate(args, g_ema, device, mean_latent)
+        run(args.ckpt, os.path.splitext(os.path.basename(args.ckpt))[0])
+        
+        
