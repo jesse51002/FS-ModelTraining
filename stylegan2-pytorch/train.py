@@ -171,6 +171,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
 
     if args.augment and args.augment_p == 0:
         ada_augment = AdaptiveAugment(args.ada_target, args.ada_length, 8, device)
+        ada_aug_p = ada_augment.ada_aug_p
 
     sample_z = torch.randn(args.n_sample, args.latent, device=device)
 
@@ -351,7 +352,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, devic
                         s3resource.upload_file(img_pth, BUCKET_NAME, ROOT_S3_IMAGES_KEY + os.path.basename(img_pth))
                         print(f"Uploaded '{img_pth}' to s3")
 
-            if i % 10000 == 0:
+            if i % args.save_checkpoint_every == 0:
                 torch.save(
                     {
                         "g": g_module.state_dict(),
@@ -504,6 +505,11 @@ if __name__ == "__main__":
         "--discriminator_loss_limit",
         type=float,
         default=0.75
+    )
+    parser.add_argument(
+        "--save_checkpoint_every",
+        type=int,
+        default=10000
     )
 
     args = parser.parse_args()

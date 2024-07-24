@@ -20,19 +20,21 @@ pytorch_estimator = PyTorch(
     max_run=431999,
     hyperparameters={
         "batch": 8,
-        "iter": 100001,
+        "iter": 65000,
         "arch": "swagan",
         "size": 1024,
         "distributed": None,
         "num_gpu": 4,
-        "aws_checkpoint_name": "050000.pt",
+        "aws_checkpoint_name": "055000.pt",
         "upload_images_to_s3": None,
         "n_sample": 36,
-        "lr_generator": 0.0002,
-        "lr_discriminator": 0.05,
-        "discriminator_loss_limit": 0.75,
+        "lr_generator": 0.00005,
+        "lr_discriminator": 0.00005,
+        "discriminator_loss_limit": 0.7,
         "augment": None,
-        "ada_length": 41000
+        "ada_length": 500000,
+        "save_checkpoint_every": 5000,
+        "ada_target": 0.57
     },
     metric_definitions=[
        {'Name': 'd_loss:error', 'Regex': 'd: (.*?);'},

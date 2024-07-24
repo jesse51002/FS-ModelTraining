@@ -18,7 +18,7 @@ class AdaptiveAugment:
         self.ada_update = 0
         self.ada_aug_buf = torch.tensor([0.0, 0.0], device=device)
         self.r_t_stat = 0
-        self.ada_aug_p = 0
+        self.ada_aug_p = 0.5
 
     @torch.no_grad()
     def tune(self, real_pred):
@@ -41,6 +41,7 @@ class AdaptiveAugment:
 
             self.ada_aug_p += sign * n_pred / self.ada_aug_len
             self.ada_aug_p = min(1, max(0, self.ada_aug_p))
+            
             self.ada_aug_buf.mul_(0)
             self.ada_update = 0
 
