@@ -20,11 +20,16 @@ from torch_utils import misc
 from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
 from torch_utils.ops import grid_sample_gradfix
+import boto3
 
 import legacy
 from metrics import metric_main
 
 #----------------------------------------------------------------------------
+
+BUCKET_NAME = "fs-upper-body-gan-dataset"
+ROOT_S3_CKPT_KEY = "training/"
+ROOT_S3_IMAGES_KEY = "training/output_images/"
 
 def setup_snapshot_image_grid(training_set, random_seed=0):
     rnd = np.random.RandomState(random_seed)
@@ -87,6 +92,7 @@ def save_image_grid(img, fname, drange, grid_size):
 
 def training_loop(
     run_dir                 = '.',      # Output directory.
+    model_dir               = '.',     # Directory where to load model.
     training_set_kwargs     = {},       # Options for training set.
     data_loader_kwargs      = {},       # Options for torch.utils.data.DataLoader.
     G_kwargs                = {},       # Options for generator network.
@@ -118,6 +124,7 @@ def training_loop(
     allow_tf32              = False,    # Enable torch.backends.cuda.matmul.allow_tf32 and torch.backends.cudnn.allow_tf32?
     abort_fn                = None,     # Callback function for determining whether to abort training. Must return consistent results across ranks.
     progress_fn             = None,     # Callback function for updating training progress. Called for all ranks.
+    upload_images_to_s3     = False,    # Upload images to S3?
 ):
     # Initialize.
     start_time = time.time()
@@ -347,7 +354,15 @@ def training_loop(
         # Save image snapshot.
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
-            save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            
+            img_pth = f'fakes{cur_nimg//1000:06d}.png'
+            
+            save_image_grid(images, os.path.join(run_dir, img_pth), drange=[-1,1], grid_size=grid_size)
+            
+            if upload_images_to_s3:
+                s3resource = boto3.client('s3')
+                s3resource.upload_file(img_pth, BUCKET_NAME, ROOT_S3_IMAGES_KEY + os.path.basename(img_pth))
+                print(f"Uploaded '{img_pth}' to s3")
 
         # Save network snapshot.
         snapshot_pkl = None
@@ -361,7 +376,7 @@ def training_loop(
                     module = copy.deepcopy(module).eval().requires_grad_(False).cpu()
                 snapshot_data[name] = module
                 del module # conserve memory
-            snapshot_pkl = os.path.join(run_dir, f'network-snapshot-{cur_nimg//1000:06d}.pkl')
+            snapshot_pkl = os.path.join(model_dir, f'network-snapshot-{cur_nimg//1000:06d}.pkl')
             if rank == 0:
                 with open(snapshot_pkl, 'wb') as f:
                     pickle.dump(snapshot_data, f)

@@ -17,6 +17,7 @@ import json
 import tempfile
 import torch
 import dnnlib
+import boto3
 
 from training import training_loop
 from metrics import metric_main
@@ -24,6 +25,10 @@ from torch_utils import training_stats
 from torch_utils import custom_ops
 
 #----------------------------------------------------------------------------
+
+BUCKET_NAME = "fs-upper-body-gan-dataset"
+ROOT_S3_CKPT_KEY = "training/"
+ROOT_S3_IMAGES_KEY = "training/output_images/"
 
 class UserError(Exception):
     pass
@@ -436,6 +441,8 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--allow-tf32', help='Allow PyTorch to use TF32 internally', type=bool, metavar='BOOL')
 @click.option('--workers', help='Override number of DataLoader workers', type=int, metavar='INT')
 
+@click.option('--upload_images_to_s3', help='Upload images to s3 [default: false]', type=bool, metavar='BOOL')
+
 def main(ctx, outdir, dry_run, **config_kwargs):
     """Train a GAN using the techniques described in the paper
     "Training Generative Adversarial Networks with Limited Data".
@@ -507,6 +514,7 @@ def main(ctx, outdir, dry_run, **config_kwargs):
     # Pick output directory.
     if "SM_OUTPUT_DATA_DIR" in os.environ:
         args.run_dir = os.environ["SM_OUTPUT_DATA_DIR"]
+        args.model_dir = os.environ["SM_MODEL_DIR"]
     else:
         prev_run_dirs = []
         if os.path.isdir(outdir):
@@ -515,8 +523,19 @@ def main(ctx, outdir, dry_run, **config_kwargs):
         prev_run_ids = [int(x.group()) for x in prev_run_ids if x is not None]
         cur_run_id = max(prev_run_ids, default=-1) + 1
         args.run_dir = os.path.join(outdir, f'{cur_run_id:05d}-{run_desc}')
+        args.model_dir = os.path.join(args.run_dir, "checkpoints")
         assert not os.path.exists(args.run_dir)
 
+    if args.aws_checkpoint_name is not None:
+        target_pth = os.path.join(args.model_dir, args.aws_checkpoint_name)
+    
+        if not os.path.isfile(target_pth):
+            assert args.ckpt is None, "Can not have ckpt and aws_checkpoint both set"
+                
+            s3resource = boto3.client('s3')
+            s3resource.download_file(Bucket=BUCKET_NAME, Key=ROOT_S3_CKPT_KEY + args.aws_checkpoint_name, Filename=target_pth)
+            
+        args.ckpt = target_pth
 
     # Print options.
     print()

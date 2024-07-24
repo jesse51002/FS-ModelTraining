@@ -13,14 +13,16 @@ pytorch_estimator = PyTorch(
     entry_point='train.py',
     source_dir=".",
     role=sagemaker_execution_role,
-    instance_type='ml.g4dn.12xlarge',
+    instance_type='ml.g5.12xlarge',
     instance_count=1,
     framework_version='2.3.0',
     py_version='py311',
     hyperparameters={
-        "batch": 8,
+        "batch_size": 32,
+        "batch_gpu": 8,
+        "gpus": 4,
         "iter": 800000,
-        "cfg": "stylegan2"
+        "cfg": "stylegan2",
     },
     metric_definitions=[
        {'Name': 'd_loss:error', 'Regex': 'd: (.*?);'},
@@ -29,15 +31,7 @@ pytorch_estimator = PyTorch(
        {'Name': 'path_loss:error', 'Regex': 'path: (.*?);'},
        {'Name': 'mean_path_length_avg:error', 'Regex': 'mean path: : (.*?);'},
        {'Name': 'ada_aug_p:error', 'Regex': 'augment: (.*?);'},
-    ],
-    distribution={
-        "torch_distributed": {
-            "enabled": True,
-            "parameters": {
-                "nproc_per_node": 4
-            }
-        }
-    }
+    ]
 )
 
 

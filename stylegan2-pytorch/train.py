@@ -519,12 +519,9 @@ if __name__ == "__main__":
         args.distributed = n_gpu > 1
     
     if args.distributed:
-        rank = os.environ["LOCAL_RANK"]
-        print(f"Starting {rank} out of {args.num_gpu}")
-        
-        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+        torch.cuda.set_device(args.local_rank)
 
-        torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=int(os.environ["LOCAL_RANK"]))
+        torch.distributed.init_process_group(backend="nccl", init_method="env://", rank=get_rank())
         synchronize()
         
     args.latent = 512
@@ -579,8 +576,6 @@ if __name__ == "__main__":
                 
     if args.ckpt is not None:
         print("load model:", args.ckpt)
-
-        ROOT_S3_CKPT_KEY
         
         ckpt = torch.load(args.ckpt, map_location=lambda storage, loc: storage)
 
