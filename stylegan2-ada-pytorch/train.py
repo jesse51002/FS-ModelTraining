@@ -8,8 +8,11 @@
 
 """Train a GAN using the techniques described in the paper
 "Training Generative Adversarial Networks with Limited Data"."""
+import warnings
+warnings.filterwarnings("ignore")
 
 import os
+os.environ["CRYPTOGRAPHY_OPENSSL_NO_LEGACY"] = "1"
 import shutil
 import click
 import re
@@ -70,6 +73,10 @@ def setup_training_loop_kwargs(
     allow_tf32 = None, # Allow PyTorch to use TF32 for matmul and convolutions: <bool>, default = False
     nobench    = None, # Disable cuDNN benchmarking: <bool>, default = False
     workers    = None, # Override number of DataLoader workers: <int>, default = 3
+
+    # Sagemaker
+    upload_images_to_s3 = False, # To upload images to s3
+    aws_checkpoint_name = None, # Checkpoint nmae
 ):
     args = dnnlib.EasyDict()
 
@@ -77,6 +84,31 @@ def setup_training_loop_kwargs(
     # General options: gpus, snap, metrics, seed
     # ------------------------------------------
 
+    if 'SM_CHANNEL_TRAIN' in os.environ:
+        data = os.environ['SM_CHANNEL_TRAIN']
+    assert data is not None, "--data is required"
+    
+    print("Starting unzipping...")
+    for zipfile in os.listdir(data):
+        if not zipfile.endswith(".zip"):
+            continue
+                
+        zip_pth = os.path.join(data, zipfile)
+        folder = os.path.join(data, zipfile[:-4])
+            
+        shutil.unpack_archive(zip_pth, folder)
+        os.remove(zip_pth)
+    
+    print("Finished unzipping...")
+
+    if aws_checkpoint_name is not None:
+        resume = os.path.join(args.model_dir, args.aws_checkpoint_name)
+    
+        assert resume is None, "Can not have ckpt and aws_checkpoint both set"
+                
+        s3resource = boto3.client('s3')
+        s3resource.download_file(Bucket=BUCKET_NAME, Key=ROOT_S3_CKPT_KEY + args.aws_checkpoint_name, Filename=resume)
+    
     if gpus is None:
         gpus = 1
     assert isinstance(gpus, int)
@@ -84,12 +116,14 @@ def setup_training_loop_kwargs(
         raise UserError('--gpus must be a power of two')
     args.num_gpus = gpus
 
+    args.upload_images_to_s3 = upload_images_to_s3
+    
     if snap is None:
         snap = 50
     assert isinstance(snap, int)
     if snap < 1:
         raise UserError('--snap must be at least 1')
-    args.image_snapshot_ticks = snap
+    args.image_snapshot_ticks = 5
     args.network_snapshot_ticks = snap
 
     if metrics is None:
@@ -160,6 +194,7 @@ def setup_training_loop_kwargs(
     cfg_specs = {
         'auto':      dict(ref_gpus=-1, kimg=25000,  mb=-1, mbstd=-1, fmaps=-1,  lrate=-1,     gamma=-1,   ema=-1,  ramp=0.05, map=2), # Populated dynamically based on resolution and GPU count.
         'stylegan2': dict(ref_gpus=8,  kimg=25000,  mb=32, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=10,   ema=10,  ramp=None, map=8), # Uses mixed-precision, unlike the original StyleGAN2.
+        'fusionstyles': dict(ref_gpus=4,  kimg=25000,  mb=32, mbstd=8,  fmaps=1,   lrate=0.0002,  gamma=10,   ema=10,  ramp=None, map=8),
         'paper256':  dict(ref_gpus=8,  kimg=25000,  mb=64, mbstd=8,  fmaps=0.5, lrate=0.0025, gamma=1,    ema=20,  ramp=None, map=8),
         'paper512':  dict(ref_gpus=8,  kimg=25000,  mb=64, mbstd=8,  fmaps=1,   lrate=0.0025, gamma=0.5,  ema=20,  ramp=None, map=8),
         'paper1024': dict(ref_gpus=8,  kimg=25000,  mb=32, mbstd=4,  fmaps=1,   lrate=0.002,  gamma=2,    ema=10,  ramp=None, map=8),
@@ -413,13 +448,13 @@ class CommaSeparatedList(click.ParamType):
 @click.option('-n', '--dry-run', help='Print training options and exit', is_flag=True)
 
 # Dataset.
-@click.option('--data', help='Training data (directory or zip)', metavar='PATH', required=True)
+@click.option('--data', help='Training data (directory or zip)', metavar='PATH')
 @click.option('--cond', help='Train conditional model based on dataset labels [default: false]', type=bool, metavar='BOOL')
 @click.option('--subset', help='Train with only N images [default: all]', type=int, metavar='INT')
 @click.option('--mirror', help='Enable dataset x-flips [default: false]', type=bool, metavar='BOOL')
 
 # Base config.
-@click.option('--cfg', help='Base config [default: auto]', type=click.Choice(['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar']))
+@click.option('--cfg', help='Base config [default: auto]', type=click.Choice(['auto', 'stylegan2', 'paper256', 'paper512', 'paper1024', 'cifar', 'fusionstyles']))
 @click.option('--gamma', help='Override R1 gamma', type=float)
 @click.option('--kimg', help='Override training duration', type=int, metavar='INT')
 @click.option('--batch', help='Override batch size', type=int, metavar='INT')
@@ -441,8 +476,9 @@ class CommaSeparatedList(click.ParamType):
 @click.option('--allow-tf32', help='Allow PyTorch to use TF32 internally', type=bool, metavar='BOOL')
 @click.option('--workers', help='Override number of DataLoader workers', type=int, metavar='INT')
 
-@click.option('--upload_images_to_s3', help='Upload images to s3 [default: false]', type=bool, metavar='BOOL')
-
+# AWS options
+@click.option('--upload_images_to_s3', help='Upload images to s3 [default: false]', is_flag=True)
+@click.option('--aws_checkpoint_name', help='Checkpoint name from s3 [default: false]', type=str, metavar='STR')
 def main(ctx, outdir, dry_run, **config_kwargs):
     """Train a GAN using the techniques described in the paper
     "Training Generative Adversarial Networks with Limited Data".
@@ -488,29 +524,13 @@ def main(ctx, outdir, dry_run, **config_kwargs):
       <PATH or URL>  Custom network pickle.
     """
     dnnlib.util.Logger(should_flush=True)
+    
     # Setup training options.
     try:
         run_desc, args = setup_training_loop_kwargs(**config_kwargs)
     except UserError as err:
         ctx.fail(err)
-        
-    if 'SM_CHANNEL_TRAIN' in os.environ:
-        args.data = os.environ['SM_CHANNEL_TRAIN']
-
-        print("Starting unzipping...")
-        
-        for zipfile in os.listdir(args.path):
-            if not zipfile.endswith(".zip"):
-                continue
-                
-            zip_pth = os.path.join(args.path, zipfile)
-            folder = os.path.join(args.path, zipfile[:-4])
-            
-            shutil.unpack_archive(zip_pth, folder)
-            os.remove(zip_pth)
-    
-        print("Finished unzipping...")
-
+       
     # Pick output directory.
     if "SM_OUTPUT_DATA_DIR" in os.environ:
         args.run_dir = os.environ["SM_OUTPUT_DATA_DIR"]
@@ -524,18 +544,8 @@ def main(ctx, outdir, dry_run, **config_kwargs):
         cur_run_id = max(prev_run_ids, default=-1) + 1
         args.run_dir = os.path.join(outdir, f'{cur_run_id:05d}-{run_desc}')
         args.model_dir = os.path.join(args.run_dir, "checkpoints")
+        
         assert not os.path.exists(args.run_dir)
-
-    if args.aws_checkpoint_name is not None:
-        target_pth = os.path.join(args.model_dir, args.aws_checkpoint_name)
-    
-        if not os.path.isfile(target_pth):
-            assert args.ckpt is None, "Can not have ckpt and aws_checkpoint both set"
-                
-            s3resource = boto3.client('s3')
-            s3resource.download_file(Bucket=BUCKET_NAME, Key=ROOT_S3_CKPT_KEY + args.aws_checkpoint_name, Filename=target_pth)
-            
-        args.ckpt = target_pth
 
     # Print options.
     print()
@@ -559,7 +569,8 @@ def main(ctx, outdir, dry_run, **config_kwargs):
 
     # Create output directory.
     print('Creating output directory...')
-    os.makedirs(args.run_dir)
+    os.makedirs(args.run_dir, exist_ok=True)
+    os.makedirs(args.model_dir, exist_ok=True)
     with open(os.path.join(args.run_dir, 'training_options.json'), 'wt') as f:
         json.dump(args, f, indent=2)
 

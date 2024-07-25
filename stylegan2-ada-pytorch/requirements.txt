@@ -1,2 +1,6 @@
 ninja
-filelock
+click
+psutil
+scipy
+boto3
+requests

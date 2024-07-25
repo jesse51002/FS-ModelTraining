@@ -18,21 +18,23 @@ pytorch_estimator = PyTorch(
     framework_version='2.3.0',
     py_version='py311',
     hyperparameters={
-        "batch_size": 32,
-        "batch_gpu": 8,
         "gpus": 4,
-        "iter": 800000,
-        "cfg": "stylegan2",
+        "cfg": "fusionstyles",
+        "augpipe": "noise",
+        "mirror": True,
+        "snap": 1,
+        "upload_images_to_s3": None,
+        "outdir": "This_is_not_used",
     },
     metric_definitions=[
-       {'Name': 'd_loss:error', 'Regex': 'd: (.*?);'},
-       {'Name': 'g_loss:error', 'Regex': 'g: (.*?);'},
-       {'Name': 'r1_val:error', 'Regex': 'r1: (.*?);'},
-       {'Name': 'path_loss:error', 'Regex': 'path: (.*?);'},
-       {'Name': 'mean_path_length_avg:error', 'Regex': 'mean path: : (.*?);'},
-       {'Name': 'ada_aug_p:error', 'Regex': 'augment: (.*?);'},
+        {'Name': 'ada_aug_p:error', 'Regex': 'augment: (.*?);'},
+        {'Name': 'fid:error', 'Regex': 'fid50k_full: (.*?);'},
+        {'Name': 'tick:error', 'Regex': 'tick: (.*?);'},
+        {'Name': 'kimg:error', 'Regex': 'kimg: (.*?);'},
     ]
 )
 
 
 pytorch_estimator.fit({'train': 's3://fs-upper-body-gan-dataset/accepted_images_background_removed/'})
+
+# python train.py --gpus 4 --cfg fusionstyles --augpipe noise --mirror True --upload_images_to_s3 --outdir training_output --data ./data --snap 1

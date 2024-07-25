@@ -191,7 +191,7 @@ def training_loop(
     for name, module in [('G_mapping', G.mapping), ('G_synthesis', G.synthesis), ('D', D), (None, G_ema), ('augment_pipe', augment_pipe)]:
         if (num_gpus > 1) and (module is not None) and len(list(module.parameters())) != 0:
             module.requires_grad_(True)
-            module = torch.nn.parallel.DistributedDataParallel(module, device_ids=[device], broadcast_buffers=False)
+            module = torch.nn.parallel.DistributedDataParallel(module, device_ids=[device], broadcast_buffers=True)
             module.requires_grad_(False)
         if name is not None:
             ddp_modules[name] = module
@@ -289,6 +289,7 @@ def training_loop(
                 sync = (round_idx == batch_size // (batch_gpu * num_gpus) - 1)
                 gain = phase.interval
                 loss.accumulate_gradients(phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, sync=sync, gain=gain)
+                
 
             # Update weights.
             phase.module.requires_grad_(False)
@@ -329,16 +330,17 @@ def training_loop(
         # Print status line, accumulating the same information in stats_collector.
         tick_end_time = time.time()
         fields = []
-        fields += [f"tick {training_stats.report0('Progress/tick', cur_tick):<5d}"]
-        fields += [f"kimg {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<8.1f}"]
-        fields += [f"time {dnnlib.util.format_time(training_stats.report0('Timing/total_sec', tick_end_time - start_time)):<12s}"]
-        fields += [f"sec/tick {training_stats.report0('Timing/sec_per_tick', tick_end_time - tick_start_time):<7.1f}"]
-        fields += [f"sec/kimg {training_stats.report0('Timing/sec_per_kimg', (tick_end_time - tick_start_time) / (cur_nimg - tick_start_nimg) * 1e3):<7.2f}"]
-        fields += [f"maintenance {training_stats.report0('Timing/maintenance_sec', maintenance_time):<6.1f}"]
-        fields += [f"cpumem {training_stats.report0('Resources/cpu_mem_gb', psutil.Process(os.getpid()).memory_info().rss / 2**30):<6.2f}"]
-        fields += [f"gpumem {training_stats.report0('Resources/peak_gpu_mem_gb', torch.cuda.max_memory_allocated(device) / 2**30):<6.2f}"]
+        fields += [f"tick {training_stats.report0('Progress/tick', cur_tick):<5d};"]
+        fields += [f"kimg {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<8.1f};"]
+        fields += [f"time: {dnnlib.util.format_time(training_stats.report0('Timing/total_sec', tick_end_time - start_time)):<12s};"]
+        fields += [f"sec/tick: {training_stats.report0('Timing/sec_per_tick', tick_end_time - tick_start_time):<7.1f};"]
+        fields += [f"sec/kimg: {training_stats.report0('Timing/sec_per_kimg', (tick_end_time - tick_start_time) / (cur_nimg - tick_start_nimg) * 1e3):<7.2f};"]
+        fields += [f"maintenance: {training_stats.report0('Timing/maintenance_sec', maintenance_time):<6.1f};"]
+        fields += [f"cpumem: {training_stats.report0('Resources/cpu_mem_gb', psutil.Process(os.getpid()).memory_info().rss / 2**30):<6.2f};"]
+        fields += [f"gpumem: {training_stats.report0('Resources/peak_gpu_mem_gb', torch.cuda.max_memory_allocated(device) / 2**30):<6.2f};"]
         torch.cuda.reset_peak_memory_stats()
-        fields += [f"augment {training_stats.report0('Progress/augment', float(augment_pipe.p.cpu()) if augment_pipe is not None else 0):.3f}"]
+        fields += [f"augment: {training_stats.report0('Progress/augment', float(augment_pipe.p.cpu()) if augment_pipe is not None else 0):.3f};"]
+        
         training_stats.report0('Timing/total_hours', (tick_end_time - start_time) / (60 * 60))
         training_stats.report0('Timing/total_days', (tick_end_time - start_time) / (24 * 60 * 60))
         if rank == 0:
@@ -355,9 +357,9 @@ def training_loop(
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             
-            img_pth = f'fakes{cur_nimg//1000:06d}.png'
+            img_pth = os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png')
             
-            save_image_grid(images, os.path.join(run_dir, img_pth), drange=[-1,1], grid_size=grid_size)
+            save_image_grid(images, img_pth, drange=[-1, 1], grid_size=grid_size)
             
             if upload_images_to_s3:
                 s3resource = boto3.client('s3')
@@ -386,10 +388,18 @@ def training_loop(
             if rank == 0:
                 print('Evaluating metrics...')
             for metric in metrics:
-                result_dict = metric_main.calc_metric(metric=metric, G=snapshot_data['G_ema'],
-                    dataset_kwargs=training_set_kwargs, num_gpus=num_gpus, rank=rank, device=device)
+                result_dict = metric_main.calc_metric(
+                    metric=metric, G=snapshot_data['G_ema'],
+                    dataset_kwargs=training_set_kwargs, num_gpus=num_gpus, rank=rank, device=device
+                )
+
                 if rank == 0:
                     metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
+
+                    for key in result_dict["results"]:
+                        value = result_dict["results"]["key"]
+                        print(f"{key}: {value}")
+                        
                 stats_metrics.update(result_dict.results)
         del snapshot_data # conserve memory
 
@@ -414,8 +424,14 @@ def training_loop(
             walltime = timestamp - start_time
             for name, value in stats_dict.items():
                 stats_tfevents.add_scalar(name, value.mean, global_step=global_step, walltime=walltime)
+
+            metrics_list = []
             for name, value in stats_metrics.items():
                 stats_tfevents.add_scalar(f'Metrics/{name}', value, global_step=global_step, walltime=walltime)
+                metrics_list.append(f"{name}: {value};")
+
+            print(" ".join(metrics_list))
+            
             stats_tfevents.flush()
         if progress_fn is not None:
             progress_fn(cur_nimg // 1000, total_kimg)
