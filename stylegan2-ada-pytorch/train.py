@@ -102,12 +102,13 @@ def setup_training_loop_kwargs(
     print("Finished unzipping...")
 
     if aws_checkpoint_name is not None:
-        resume = os.path.join(args.model_dir, args.aws_checkpoint_name)
-    
         assert resume is None, "Can not have ckpt and aws_checkpoint both set"
+
+        os.makedirs("temp", exist_ok=True)
+        resume = os.path.join("temp", aws_checkpoint_name)
                 
         s3resource = boto3.client('s3')
-        s3resource.download_file(Bucket=BUCKET_NAME, Key=ROOT_S3_CKPT_KEY + args.aws_checkpoint_name, Filename=resume)
+        s3resource.download_file(Bucket=BUCKET_NAME, Key=ROOT_S3_CKPT_KEY + aws_checkpoint_name, Filename=resume)
     
     if gpus is None:
         gpus = 1
@@ -123,7 +124,7 @@ def setup_training_loop_kwargs(
     assert isinstance(snap, int)
     if snap < 1:
         raise UserError('--snap must be at least 1')
-    args.image_snapshot_ticks = 5
+    args.image_snapshot_ticks = min(snap, 5)
     args.network_snapshot_ticks = snap
 
     if metrics is None:
@@ -478,7 +479,7 @@ class CommaSeparatedList(click.ParamType):
 
 # AWS options
 @click.option('--upload_images_to_s3', help='Upload images to s3 [default: false]', is_flag=True)
-@click.option('--aws_checkpoint_name', help='Checkpoint name from s3 [default: false]', type=str, metavar='STR')
+@click.option('--aws_checkpoint_name', help='Checkpoint name from s3', type=str, metavar='PKL')
 def main(ctx, outdir, dry_run, **config_kwargs):
     """Train a GAN using the techniques described in the paper
     "Training Generative Adversarial Networks with Limited Data".

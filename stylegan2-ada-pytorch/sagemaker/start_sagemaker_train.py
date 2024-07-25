@@ -22,9 +22,10 @@ pytorch_estimator = PyTorch(
         "cfg": "fusionstyles",
         "augpipe": "noise",
         "mirror": True,
-        "snap": 1,
+        "snap": 50,
         "upload_images_to_s3": None,
         "outdir": "This_is_not_used",
+        "aws_checkpoint_name": "start.pkl"
     },
     metric_definitions=[
         {'Name': 'ada_aug_p:error', 'Regex': 'augment: (.*?);'},
@@ -37,4 +38,4 @@ pytorch_estimator = PyTorch(
 
 pytorch_estimator.fit({'train': 's3://fs-upper-body-gan-dataset/accepted_images_background_removed/'})
 
-# python train.py --gpus 4 --cfg fusionstyles --augpipe noise --mirror True --upload_images_to_s3 --outdir training_output --data ./data --snap 1
+# python train.py --gpus 4 --cfg fusionstyles --augpipe noise --mirror True --upload_images_to_s3 --outdir training_output --data ./data --snap 1 --aws_checkpoint_name start.pkl

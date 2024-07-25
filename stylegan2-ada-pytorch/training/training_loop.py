@@ -330,8 +330,8 @@ def training_loop(
         # Print status line, accumulating the same information in stats_collector.
         tick_end_time = time.time()
         fields = []
-        fields += [f"tick {training_stats.report0('Progress/tick', cur_tick):<5d};"]
-        fields += [f"kimg {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<8.1f};"]
+        fields += [f"tick: {training_stats.report0('Progress/tick', cur_tick):<5d};"]
+        fields += [f"kimg: {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<8.1f};"]
         fields += [f"time: {dnnlib.util.format_time(training_stats.report0('Timing/total_sec', tick_end_time - start_time)):<12s};"]
         fields += [f"sec/tick: {training_stats.report0('Timing/sec_per_tick', tick_end_time - tick_start_time):<7.1f};"]
         fields += [f"sec/kimg: {training_stats.report0('Timing/sec_per_kimg', (tick_end_time - tick_start_time) / (cur_nimg - tick_start_nimg) * 1e3):<7.2f};"]
@@ -382,6 +382,7 @@ def training_loop(
             if rank == 0:
                 with open(snapshot_pkl, 'wb') as f:
                     pickle.dump(snapshot_data, f)
+                print("Saved pkl to", snapshot_pkl)
 
         # Evaluate metrics.
         if (snapshot_data is not None) and (len(metrics) > 0):
@@ -397,10 +398,11 @@ def training_loop(
                     metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
 
                     for key in result_dict["results"]:
-                        value = result_dict["results"]["key"]
+                        value = result_dict["results"][key]
                         print(f"{key}: {value}")
-                        
+                
                 stats_metrics.update(result_dict.results)
+        
         del snapshot_data # conserve memory
 
         # Collect statistics.
@@ -422,15 +424,13 @@ def training_loop(
         if stats_tfevents is not None:
             global_step = int(cur_nimg / 1e3)
             walltime = timestamp - start_time
+
+            metrics_list = []
             for name, value in stats_dict.items():
                 stats_tfevents.add_scalar(name, value.mean, global_step=global_step, walltime=walltime)
 
-            metrics_list = []
             for name, value in stats_metrics.items():
                 stats_tfevents.add_scalar(f'Metrics/{name}', value, global_step=global_step, walltime=walltime)
-                metrics_list.append(f"{name}: {value};")
-
-            print(" ".join(metrics_list))
             
             stats_tfevents.flush()
         if progress_fn is not None:
