@@ -17,6 +17,7 @@ pytorch_estimator = PyTorch(
     instance_count=1,
     framework_version='2.3.0',
     py_version='py311',
+    max_run=431999,
     hyperparameters={
         "gpus": 4,
         "cfg": "fusionstyles",
