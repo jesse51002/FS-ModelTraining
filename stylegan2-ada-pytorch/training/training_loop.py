@@ -399,7 +399,7 @@ def training_loop(
 
                     for key in result_dict["results"]:
                         value = result_dict["results"][key]
-                        print(f"{key}: {value}")
+                        print(f"{key}: {value};")
                 
                 stats_metrics.update(result_dict.results)
         

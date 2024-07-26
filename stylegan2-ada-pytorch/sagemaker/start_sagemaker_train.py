@@ -26,12 +26,11 @@ pytorch_estimator = PyTorch(
         "snap": 50,
         "upload_images_to_s3": None,
         "outdir": "This_is_not_used",
-        "aws_checkpoint_name": "start.pkl"
+        "aws_checkpoint_name": "model_run1_1800kimgs.pkl"
     },
     metric_definitions=[
         {'Name': 'ada_aug_p:error', 'Regex': 'augment: (.*?);'},
         {'Name': 'fid:error', 'Regex': 'fid50k_full: (.*?);'},
-        {'Name': 'tick:error', 'Regex': 'tick: (.*?);'},
         {'Name': 'kimg:error', 'Regex': 'kimg: (.*?);'},
     ]
 )
