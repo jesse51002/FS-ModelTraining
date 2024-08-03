@@ -21,12 +21,12 @@ pytorch_estimator = PyTorch(
     hyperparameters={
         "gpus": 4,
         "cfg": "fusionstyles",
-        "augpipe": "noise",
+        "aug": "noaug",
         "mirror": True,
         "snap": 50,
         "upload_images_to_s3": None,
         "outdir": "This_is_not_used",
-        "aws_checkpoint_name": "model_run1_1800kimgs.pkl"
+        "aws_checkpoint_name": "model_run5_3600kimgs.pkl"
     },
     metric_definitions=[
         {'Name': 'ada_aug_p:error', 'Regex': 'augment: (.*?);'},
